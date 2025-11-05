@@ -15,7 +15,7 @@ Supported foundation models:
 + <a href="https://github.com/deepseek-ai/DeepSeek-R1">DeepSeek-R1</a>
 + <a href="https://github.com/QwenLM/Qwen2.5-VL">Qwen2-VL</a>
 + <a href="https://github.com/meta-llama/llama3">Llama3</a>
-+ <a href="https://github.com/openai/gpt-2">GTP-2</a>
++ <a href="https://github.com/openai/gpt-2">GPT-2</a>
 
 ## SplitLoRA
 
