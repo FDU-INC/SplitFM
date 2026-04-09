@@ -1,5 +1,9 @@
 import argparse
+import json
+import logging
 import os
+import time
+import uuid
 from typing import Any, Dict, Optional
 
 try:
@@ -29,6 +33,83 @@ except ImportError:
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+
+
+LOGGER = logging.getLogger("splitinfer.api_server")
+
+
+def _configure_logging():
+    if logging.getLogger().handlers:
+        return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+
+
+def _safe_json(data: Any) -> str:
+    try:
+        return json.dumps(data, ensure_ascii=False, default=str)
+    except Exception:
+        return repr(data)
+
+
+def _sanitize_headers(headers: Dict[str, str]) -> Dict[str, str]:
+    sanitized = dict(headers)
+    if sanitized.get("authorization"):
+        sanitized["authorization"] = "Bearer ***"
+    return sanitized
+
+
+def _request_log_context(request: Request) -> Dict[str, Any]:
+    return {
+        "request_id": getattr(request.state, "request_id", None),
+        "method": request.method,
+        "path": request.url.path,
+        "query": str(request.url.query),
+        "client": request.client.host if request.client else None,
+        "headers": _sanitize_headers(dict(request.headers)),
+    }
+
+
+def _log_request_received(request: Request, payload: Optional[Dict[str, Any]] = None):
+    context = _request_log_context(request)
+    if payload is not None:
+        context["payload"] = payload
+    LOGGER.info("request_received %s", _safe_json(context))
+
+
+def _log_response_sent(
+    request: Request,
+    status_code: int,
+    response_body: Any,
+    started_at: float,
+    extra: Optional[Dict[str, Any]] = None,
+):
+    context = _request_log_context(request)
+    context.update(
+        {
+            "status_code": status_code,
+            "elapsed_ms": round((time.time() - started_at) * 1000, 2),
+            "response": response_body,
+        }
+    )
+    if extra:
+        context.update(extra)
+    LOGGER.info("response_sent %s", _safe_json(context))
+
+
+def _log_exception(request: Request, status_code: int, message: str, extra: Optional[Dict[str, Any]] = None):
+    context = _request_log_context(request)
+    context.update(
+        {
+            "status_code": status_code,
+            "error": message,
+        }
+    )
+    if extra:
+        context.update(extra)
+    LOGGER.error("request_failed %s", _safe_json(context))
 
 
 class SplitInferenceService:
@@ -116,6 +197,11 @@ def create_app(
     )
     app = FastAPI(title="SplitInfer OpenAI-Compatible API", version="1.0.0")
 
+    @app.middleware("http")
+    async def attach_request_id(request: Request, call_next):
+        request.state.request_id = f"req-{uuid.uuid4().hex}"
+        return await call_next(request)
+
     def require_api_key(authorization: Optional[str] = Header(default=None)):
         if not api_key:
             return
@@ -128,23 +214,33 @@ def create_app(
             raise HTTPException(status_code=401, detail="Invalid API key.")
 
     @app.exception_handler(OpenAIRequestError)
-    async def handle_request_error(_: Request, exc: OpenAIRequestError):
+    async def handle_request_error(request: Request, exc: OpenAIRequestError):
+        _log_exception(request, 400, exc.message, extra={"param": exc.param, "code": exc.code})
         return _openai_error_response(400, exc.message, param=exc.param, code=exc.code)
 
     @app.exception_handler(HTTPException)
-    async def handle_http_exception(_: Request, exc: HTTPException):
+    async def handle_http_exception(request: Request, exc: HTTPException):
         if exc.status_code == 401:
+            _log_exception(request, 401, str(exc.detail), extra={"code": "unauthorized"})
             return _openai_error_response(401, str(exc.detail), code="unauthorized")
         if exc.status_code == 404:
+            _log_exception(request, 404, str(exc.detail), extra={"param": "model", "code": "model_not_found"})
             return _openai_error_response(404, str(exc.detail), param="model", code="model_not_found")
+        _log_exception(request, exc.status_code, str(exc.detail))
         return _openai_error_response(exc.status_code, str(exc.detail))
 
     @app.get("/v1/models")
-    async def list_models(_: None = Depends(require_api_key)):
-        return build_models_response(service.list_models())
+    async def list_models(request: Request, _: None = Depends(require_api_key)):
+        started_at = time.time()
+        _log_request_received(request)
+        response = build_models_response(service.list_models())
+        _log_response_sent(request, 200, response, started_at)
+        return response
 
     @app.post("/v1/chat/completions")
-    async def create_chat_completion(payload: Dict[str, Any], _: None = Depends(require_api_key)):
+    async def create_chat_completion(payload: Dict[str, Any], request: Request, _: None = Depends(require_api_key)):
+        started_at = time.time()
+        _log_request_received(request, payload=payload)
         parsed = parse_chat_request(payload)
 
         if parsed.stream:
@@ -154,8 +250,32 @@ def create_app(
                 max_tokens=parsed.max_tokens,
                 temperature=parsed.temperature,
             )
+
+            def logged_stream():
+                chunk_index = 0
+                for event in iter_stream_events(parsed.model, token_stream):
+                    LOGGER.info(
+                        "stream_chunk %s",
+                        _safe_json(
+                            {
+                                **_request_log_context(request),
+                                "chunk_index": chunk_index,
+                                "event": event.rstrip(),
+                            }
+                        ),
+                    )
+                    chunk_index += 1
+                    yield event
+                _log_response_sent(
+                    request,
+                    200,
+                    {"stream": True, "chunks_sent": chunk_index},
+                    started_at,
+                    extra={"stream": True},
+                )
+
             return StreamingResponse(
-                iter_stream_events(parsed.model, token_stream),
+                logged_stream(),
                 media_type="text/event-stream",
             )
 
@@ -166,12 +286,14 @@ def create_app(
             temperature=parsed.temperature,
         )
 
-        return build_chat_response(
+        response = build_chat_response(
             model=parsed.model,
             content=result["content"],
             prompt_tokens=result["prompt_tokens"],
             completion_tokens=result["completion_tokens"],
         )
+        _log_response_sent(request, 200, response, started_at)
+        return response
 
     return app
 
@@ -214,6 +336,20 @@ def main():
 
     import uvicorn
 
+    _configure_logging()
+    LOGGER.info(
+        "server_starting %s",
+        _safe_json(
+            {
+                "host": settings.host,
+                "port": settings.port,
+                "gpu": settings.gpu,
+                "weights_root": settings.weights_root,
+                "model_paths": settings.model_paths,
+                "api_key_configured": bool(settings.api_key),
+            }
+        ),
+    )
     uvicorn.run(create_app(settings=settings), host=settings.host, port=settings.port)
 
 
