@@ -187,6 +187,8 @@ python eval/e2e/measure_scores.py e2e_ref.txt e2e_pred.txt -p
 
 **SplitInfer** is a framework designed to facilitate the **split inference** of large foundation models, enabling efficient deployment on resource-constrained edge devices while preserving data privacy. By leveraging cloud computing resources, SplitInfer allows for the inference of large models without transmitting sensitive data to high-performance servers. This framework supports popular foundation models such as GPT-2, Llama3, Qwen2-VL, and DeepSeek-R1, providing a flexible and efficient solution for edge computing environments.
 
+OpenAI-compatible HTTP serving is available for inference-only use cases. See [SplitInfer/API_SERVER_USAGE_EN.md](SplitInfer/API_SERVER_USAGE_EN.md) and [SplitInfer/API_SERVER_USAGE_ZH.md](SplitInfer/API_SERVER_USAGE_ZH.md) for the server guides. Model weights can be configured with CLI parameters, environment variables, or a JSON config file.
+
 ### User Guide
 
 #### 1 Build
@@ -299,4 +301,3 @@ If you've found SplitFM useful for your project, please cite our paper.
 
 ## Update
 [2025/01/09] 🔥 We are excited to announce the release of the SplitFM v1.1.0 version for Llama3 . This code allows you to efficiently train the Llama3 model by leveraging split learning techniques. You can access and review the code at the following link: [[Code](https://github.com/FDU-INC/Split_LoRA/tree/v1.1.0)]
-

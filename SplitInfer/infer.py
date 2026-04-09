@@ -1,48 +1,10 @@
 import os
-import sys
 import argparse
-import importlib.util
 
-MODEL_REGISTRY = {
-    # 1. Qwen2-VL
-    "Qwen2-VL-7B-Instruct": {
-        "folder": "Qwen2-VL-7B-Instruct",      # model path
-        "adapter_class": "QwenAdapter"            # model adapter
-    },
-
-    # 2. DeepSeek-R1 (Distill Llama)
-    "DeepSeek-R1-Distill-Llama-8B": {
-        "folder": "DeepSeek-R1-Distill-Llama-8B",
-        "adapter_class": "DeepSeekAdapter"          
-    },
-
-    # 3. Llama-3
-    "Llama-3-8B-Instruct": {
-        "folder": "Llama-3-8B-Instruct",
-        "adapter_class": "LlamaAdapter"
-    }
-}
-
-def load_adapter(model_name):
-    if model_name not in MODEL_REGISTRY:
-        raise ValueError(f"Unsupported models: {model_name}.")
-    
-    config = MODEL_REGISTRY[model_name]
-    
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    code_dir = os.path.join(base_dir, "Models", config["folder"])
-    adapter_path = os.path.join(code_dir, "adapter.py")
-    weights_path = os.path.join(base_dir, "weights", model_name)
-
-    spec = importlib.util.spec_from_file_location(f"{model_name}_adapter", adapter_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[f"{model_name}_adapter"] = module 
-    spec.loader.exec_module(module)
-    AdapterClass = getattr(module, config["adapter_class"])
-    adapter = AdapterClass(model_name)
-    
-    return adapter, weights_path
-
+try:
+    from .runtime import MODEL_REGISTRY, load_adapter
+except ImportError:
+    from runtime import MODEL_REGISTRY, load_adapter
 
 def main():
     parser = argparse.ArgumentParser(description="SplitInfer Unified Interface")

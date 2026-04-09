@@ -2,3 +2,9 @@
 *.pt
 
 *__pycache__
+
+# Codex local guidance and workspace artifacts
+AGENTS.md
+.codex/
+.codex-*/
+.agents/

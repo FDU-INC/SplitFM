@@ -1,0 +1,12 @@
+{
+  "host": "0.0.0.0",
+  "port": 8000,
+  "gpu": "0,1,2",
+  "api_key": "replace-me-if-needed",
+  "weights_root": "/path/to/weights-root",
+  "model_paths": {
+    "Llama-3-8B-Instruct": "/path/to/llama3-weights",
+    "DeepSeek-R1-Distill-Llama-8B": "/path/to/deepseek-weights",
+    "Qwen2-VL-7B-Instruct": "/path/to/qwen2vl-weights"
+  }
+}
